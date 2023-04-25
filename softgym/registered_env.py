@@ -95,7 +95,7 @@ env_arg_dict = {
     "TshirtFlattenCFM": {
         "observation_mode": "cam_rgb",
         "action_mode": "picker",
-        "num_picker": 2,
+        "num_picker": 1,
         "render": True,
         "headless": True,
         "horizon": 100,
