@@ -102,7 +102,7 @@ env_arg_dict = {
         "action_repeat": 8,
         "render_mode": "cloth",
         "num_variations": 1000,
-        "use_cached_states": True,
+        "use_cached_states": False,
         "deterministic": False,
     },
     "ClothFlattenPPP": {
