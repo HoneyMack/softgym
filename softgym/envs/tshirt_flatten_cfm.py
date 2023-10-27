@@ -312,8 +312,8 @@ class TshirtFlattenCFMEnv(ClothEnv):
             'scale': -1,
             'rot': 0.0,
             'vel': [0., 0., 0.],
-            'stiff': 1.0,
-            'mass': 0.5 / (40 * 40),
+            'stiff': 1.0*1e-1,
+            'mass': 0.5 / (40 * 40)*((1e-1)**2),
             'radius': self.cloth_particle_radius,  # / 1.8,
             'camera_name': 'default_camera',
             'camera_params': {'default_camera':
