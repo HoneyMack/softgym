@@ -33,12 +33,13 @@ class GarmentFlattenEnv(ClothEnv):
         self.cloth_type = cloth_type
         self.prev_covered_area = None  # Should not be used until initialized, used for computing reward
         
-        #action spaceの上書き
+        # action spaceの上書き
         self.action_space = spaces.Dict({
             #pick_posはcloth_envのpickerのlow,highを参考に合わせている(action_spaceのlow,highではない)
             "pick_pos":spaces.Box(low=np.array([-0.2,0.0,-0.2]),high=np.array([0.2,0.05,0.2]),dtype=np.float32),
             "place_pos":spaces.Box(low=np.array([-0.2,0.01,-0.2]),high=np.array([0.2,0.05,0.2]),dtype=np.float32),
         })
+        
         self.get_cached_configs_and_states(cached_states_path, self.num_variations)
         
 
@@ -127,24 +128,7 @@ class GarmentFlattenEnv(ClothEnv):
 
 
         return generated_configs, generated_states
-    
-    def _wait_for_stable(self,max_wait_steps:int = 100,stable_vel_threshold:float = 0.25):
-        """
-        Wait for the cloth to stabilize.
-
-        Parameters
-        ----------
-        max_wait_steps : int, optional
-            Maximum number of steps waiting for the cloth to stabilize, by default 100
-        stable_vel_threshold : float, optional
-            Cloth stable when all particles' vel are smaller than this, by default 0.25
-        """
-        # wait for stabilization
-        for _ in range(max_wait_steps):
-            pyflex.step()
-            curr_vel = pyflex.get_velocities()
-            if np.alltrue(np.abs(curr_vel) < stable_vel_threshold):
-                break
+            
     def reset(self, to_flat=True):
         """
         Reset the environment.
@@ -159,7 +143,6 @@ class GarmentFlattenEnv(ClothEnv):
         np.ndarray
             Observation of the environment.
         """
-        #obs = super(GarmentFlattenEnv,self).reset()
         obs = super().reset()
         
         if to_flat:
@@ -169,12 +152,12 @@ class GarmentFlattenEnv(ClothEnv):
 
     def _reset(self):
         """ Right now only use one initial state"""
-        self.prev_covered_area = self._get_current_covered_area(pyflex.get_positions())
+        self.prev_covered_area = self._get_current_covered_area(self.get_positions())
         if hasattr(self, 'action_tool'):
-            curr_pos = pyflex.get_positions()
+            curr_pos = self.get_positions()
             cx, cy = self._get_center_point(curr_pos)
             self.action_tool.reset([cx, 0.2, cy])
-        pyflex.step()
+        self.step_simulation()
         self.init_covered_area = None
         info = self._get_info()
         self.init_covered_area = info['performance']
@@ -217,7 +200,6 @@ class GarmentFlattenEnv(ClothEnv):
         pick_pos = action["pick_pos"]
         place_pos = action["place_pos"]
         
-        
         self._perform_picking_action(pick_pos,place_pos)
         self._wait_for_stable()
         
@@ -252,7 +234,8 @@ class GarmentFlattenEnv(ClothEnv):
         shape_states[0, 7:10] = pick_pos
 
         pyflex.set_shape_states(shape_states)
-        pyflex.step()
+        
+        self.step_simulation()
 
         # pick and move
         for a in action:
@@ -260,6 +243,26 @@ class GarmentFlattenEnv(ClothEnv):
         # release
         a = np.zeros(4)
         _, _, _, _ = super().step(a)
+        
+    def _wait_for_stable(self,max_wait_steps:int = 100,stable_vel_threshold:float = 0.25):
+        """
+        Wait for the cloth to stabilize.
+
+        Parameters
+        ----------
+        max_wait_steps : int, optional
+            Maximum number of steps waiting for the cloth to stabilize, by default 100
+        stable_vel_threshold : float, optional
+            Cloth stable when all particles' vel are smaller than this, by default 0.25
+        """
+        # wait for stable
+        for _ in range(max_wait_steps):
+            self.step_simulation()
+            curr_vel = self.get_velocities()
+            if np.alltrue(np.abs(curr_vel) < stable_vel_threshold):
+                break
+        else:
+            print('Warning: cloth not stable')
         
     def sample_pick_pos(self)->np.ndarray:
         #布の点をランダムに選択して確実に持てる位置を選ぶ
@@ -270,12 +273,11 @@ class GarmentFlattenEnv(ClothEnv):
         picking_pos[1] += 0.01
         return picking_pos
 
-    def _get_current_covered_area(self, pos):
+    def _get_current_covered_area(self, pos: np.ndarray):
         """
         Calculate the covered area by taking max x,y cood and min x,y coord, create a discritized grid between the points
         :param pos: Current positions of the particle states
         """
-        pos = np.reshape(pos, [-1, 4])
         min_x = np.min(pos[:, 0])
         min_y = np.min(pos[:, 2])
         max_x = np.max(pos[:, 0])
@@ -308,7 +310,6 @@ class GarmentFlattenEnv(ClothEnv):
         # return np.sum(grid_copy) * span[0] * span[1]
 
     def _get_center_point(self, pos):
-        pos = np.reshape(pos, [-1, 4])
         min_x = np.min(pos[:, 0])
         min_y = np.min(pos[:, 2])
         max_x = np.max(pos[:, 0])
@@ -316,22 +317,13 @@ class GarmentFlattenEnv(ClothEnv):
         return 0.5 * (min_x + max_x), 0.5 * (min_y + max_y)
 
     def compute_reward(self, action=None, obs=None, set_prev_reward=False):
-        particle_pos = pyflex.get_positions()
+        particle_pos = self.get_positions()
         curr_covered_area = self._get_current_covered_area(particle_pos)
-        r = curr_covered_area
-        return r
-
-    # @property
-    # def performance_bound(self):
-    #     dimx, dimy = self.current_config['ClothSize']
-    #     max_area = dimx * self.cloth_particle_radius * dimy * self.cloth_particle_radius
-    #     min_p = 0
-    #     max_p = max_area
-    #     return min_p, max_p
+        return curr_covered_area
 
     def _get_info(self):
         # Duplicate of the compute reward function!
-        particle_pos = pyflex.get_positions()
+        particle_pos = self.get_positions()
         curr_covered_area = self._get_current_covered_area(particle_pos)
         init_covered_area = curr_covered_area if self.init_covered_area is None else self.init_covered_area
         max_covered_area = self.get_current_config()['flatten_area']
@@ -359,43 +351,47 @@ class GarmentFlattenEnv(ClothEnv):
             return []
 
     def set_scene(self, config, state=None):
+        # 描画モードの設定
         if self.render_mode == 'particle':
             render_mode = 1
         elif self.render_mode == 'cloth':
             render_mode = 2
         elif self.render_mode == 'both':
             render_mode = 3
-        camera_params = config['camera_params'][config['camera_name']]
-        env_idx = 3
+
+        #衣服の種類の設定
         if self.cloth_type == 'tshirt':
             cloth_type = 0
         elif self.cloth_type == 'shorts':
             cloth_type = 1
+        elif self.cloth_type == 'tshirt-small':
+            cloth_type = 2
         elif self.cloth_type == 'tank_male':
             cloth_type = 10
         else:
-            cloth_type = 2
+            raise NotImplementedError(f"cloth_type {self.cloth_type} is not implemented")
+        
+        # シーンのパラメータの設定
+        camera_params = config['camera_params'][config['camera_name']]
         scene_params = np.concatenate(
             [config['pos'][:], [config['scale'], config['rot']], config['vel'][:], [config['stiff'], config['mass'], config['radius']],
              camera_params['pos'][:], camera_params['angle'][:], [camera_params['width'], camera_params['height']], [render_mode], [cloth_type]])
+        
+        # シーンの設定: バージョンごとに設定が異なるので注意
+        env_idx = 3 #服広げで使用する環境？
         if self.version == 2:
             robot_params = []
             self.params = (scene_params, robot_params)
             pyflex.set_scene(env_idx, scene_params, 0, robot_params)
         elif self.version == 1:
-            #print("set scene")
             pyflex.set_scene(env_idx, scene_params, 0)
-            #print("after set scene")
 
         self.rotate_particles([0, 0, -90])
         self.move_to_pos([0, 0.05, 0])
-        for _ in range(50):
-            # print("after move to pos step {}".format(_))
-            pyflex.step()
-            # obs = self._get_obs()
-            # cv2.imshow("obs at after move to obs", obs)
-            # cv2.waitKey()
-        self.default_pos = pyflex.get_positions()
+        
+        self._wait_for_stable()
+        
+        self.default_pos = self.get_positions()
 
         if state is not None:
             self.set_state(state)
@@ -414,7 +410,7 @@ class GarmentFlattenEnv(ClothEnv):
         # 布に関するconfig
         config_cloth = {
             'pos': [0.01, 0.15, 0.01],
-            'scale': -1,
+            'scale': 0.5,#-1,
             'rot': 0.0,
             'vel': [0., 0., 0.],
             'stiff': 1.0*1e-1,
@@ -455,25 +451,38 @@ class GarmentFlattenEnv(ClothEnv):
 
     def rotate_particles(self, angle):
         r = R.from_euler('zyx', angle, degrees=True)
-        pos = pyflex.get_positions().reshape(-1, 4)
+        pos = self.get_positions()
         center = np.mean(pos, axis=0)
         pos -= center
-        new_pos = pos.copy()[:, :3]
-        new_pos = r.apply(new_pos)
-        new_pos = np.column_stack([new_pos, pos[:, 3]])
-        new_pos += center
-        pyflex.set_positions(new_pos)
+        rot_pos_xyz = pos.copy()[:, :3]
+        rot_pos_xyz = r.apply(rot_pos_xyz)
+        rot_pos_xyzm = np.column_stack([rot_pos_xyz, pos[:, 3]])
+        rot_pos_xyzm += center
+        self.set_positions(rot_pos_xyzm)
 
-    def _set_to_flat(self, pos=None):
+    def _set_to_flat(self, pos:np.ndarray=None):
+        """
+        服を完全に広げる関数
+
+        Parameters
+        ----------
+        pos : np.ndarray, optional
+            位置を表す配列(N,4)
+            N: 粒子数
+            4: 座標(x,y,z)と各粒子の質量, by default None
+
+        Returns
+        -------
+        float
+            布が完全に広がったときの面積
+        """
+
         if pos is None:
             pos = self.default_pos
-        if self.cloth_type == 'shorts':
-            with open(self.shorts_pkl_path, 'rb') as f:
-                pos = pickle.load(f)
-        pyflex.set_positions(pos)
-        # if self.cloth_type != 'shorts':
-        #     self.rotate_particles([0, 0, 90])
-        pyflex.step()
+        
+        self.set_positions(pos)
+        self.step_simulation()
+
         return self._get_current_covered_area(pos)
 
     def move_to_pos(self, new_pos):
@@ -485,13 +494,11 @@ class GarmentFlattenEnv(ClothEnv):
         new_pos : np.ndarray
             移動先の重心座標
         """
-        #TODO: 上の記述であっているか
-        pos = pyflex.get_positions().reshape(-1, 4)
+        pos = self.get_positions()
         center = np.mean(pos, axis=0)
         pos[:, :3] -= center[:3]
         pos[:, :3] += np.asarray(new_pos)
-        pyflex.set_positions(pos)
-
+        self.set_positions(pos)
 
 
 
@@ -517,19 +524,20 @@ if __name__ == '__main__':
             'picker_threshold': 0.015,#0.00625,
             'num_variations': 1,
             'cached_states_path': f"{env_name}_{cloth_type}_init_states.pkl",
-            'use_cached_states': True,
-            'save_cached_states': False,
+            'use_cached_states':  False,
+            'save_cached_states': True,
             'cloth_type': cloth_type,
         })
         
         return args
 
     env_name = 'GarmentFlatten'
-    softgym_env_args = get_softgym_env_args(env_name)
+    cloth_type = 'tank_male'
+    # cloth_type = 'tshirt-small'
+    softgym_env_args = get_softgym_env_args(env_name,cloth_type)
     env:GarmentFlattenEnv = SOFTGYM_ENVS[env_name](**softgym_env_args)
     
-    obs = env.reset(to_flat=False)
-    
+    obs = env.reset()
     history = [obs]
     
     for i in range(1,5):
