@@ -205,6 +205,13 @@ class FlexEnv(gym.Env):
         if record_continuous_video:
             info['flex_env_recorded_frames'] = frames
         return obs, reward, done, info
+    
+    def step_simulation(self):
+        """
+        This function steps the simulation without any actions.
+        """
+        pyflex.step()
+        
 
     def initialize_camera(self):
         """
@@ -259,6 +266,62 @@ class FlexEnv(gym.Env):
     def compute_reward(self, action=None, obs=None, set_prev_reward=False):
         """ set_prev_reward is used for calculate delta rewards"""
         raise NotImplementedError
+    
+
+    def get_positions(self)->np.ndarray:
+        """
+        Get the positions of all particles in the scene
+
+        Returns
+        -------
+        np.ndarray
+            (N,4) array of positions.
+            N: number of particles
+            4: (x,y,z) position and mass of each particle
+        """
+        pos_flat = pyflex.get_positions()
+        return pos_flat.reshape(-1, 4)
+    
+    def get_velicities(self)->np.ndarray:
+        """
+        Get the velocities of all particles in the scene
+
+        Returns
+        -------
+        np.ndarray
+            (N,3) array of velocities.
+            N: number of particles
+            3: (x,y,z) velocity of each particle
+        """
+        vel_flat = pyflex.get_velocities()
+        return vel_flat.reshape(-1, 3)
+    
+    def set_positions(self,pos:np.ndarray):
+        """
+        Set the positions of all particles in the scene
+
+        Parameters
+        ----------
+        pos : np.ndarray
+            (N,4) array of positions.
+            N: number of particles
+            4: (x,y,z) position and mass of each particle
+        """
+        pyflex.set_positions(pos.reshape(-1))
+        
+    def set_velocities(self,vel:np.ndarray):
+        """
+        Set the velocities of all particles in the scene
+
+        Parameters
+        ----------
+        vel : np.ndarray
+            (N,3) array of velocities.
+            N: number of particles
+            3: (x,y,z) velocity of each particle
+        """
+        pyflex.set_velocities(vel.reshape(-1))
+        
 
     def _get_obs(self):
         raise NotImplementedError
@@ -274,3 +337,4 @@ class FlexEnv(gym.Env):
 
     def _seed(self):
         pass
+    

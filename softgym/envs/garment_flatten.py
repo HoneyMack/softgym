@@ -6,30 +6,82 @@ from copy import deepcopy
 from softgym.utils.misc import vectorized_range, vectorized_meshgrid
 from softgym.utils.pyflex_utils import center_object
 from scipy.spatial.transform import Rotation as R
+from typing import Dict, Any
 import cv2
 import pickle
 import os
+import gym
+import gym.spaces as spaces
 
 #TODO:プログラムの整理・コメントの追加
 # 現状、tshirt_flatten_cfm.pyと同じ内容のファイル
 class GarmentFlattenEnv(ClothEnv):
-    def __init__(self, cached_states_path='tshirt_flatten_init_states.pkl', cloth_type='tshirt-small', **kwargs):
+    def __init__(self, cached_states_path='tshirt_flatten_init_states.pkl', cloth_type='tank_male', **kwargs):
         """
-        :param cached_states_path:
-        :param num_picker: Number of pickers if the aciton_mode is picker
-        :param kwargs:
-        """
-        self.cloth_type = cloth_type
-        cur_path = os.path.dirname(os.path.abspath(__file__))
-        self.shorts_pkl_path = os.path.join(cur_path, '../cached_initial_states/shorts_flatten.pkl')
-        super().__init__(**kwargs)
-        self.get_cached_configs_and_states(cached_states_path, self.num_variations)
-        self.prev_covered_area = None  # Should not be used until initialized
+        Initialize the GarmentFlattenEnv environment.
 
-    def generate_env_variation(self, num_variations=1, vary_cloth_size=True):
-        """ Generate initial states. Note: This will also change the current states! """
-        max_wait_step = 300  # Maximum number of steps waiting for the cloth to stablize
-        stable_vel_threshold = 0.01  # Cloth stable when all particles' vel are smaller than this
+        Parameters
+        ----------
+        cached_states_path : str
+            Path to the cached states.
+        cloth_type : str
+            Type of the cloth (e.g., 'tank_male').
+        kwargs : dict
+            keyword arguments for ClothEnv.
+        """
+        super().__init__(**kwargs)
+
+        self.cloth_type = cloth_type
+        self.prev_covered_area = None  # Should not be used until initialized, used for computing reward
+        
+        self._initialize_env()
+        
+        #action spaceの上書き
+        self.action_space = spaces.Dict({
+            #pick_posはcloth_envのpickerのlow,highを参考に合わせている(action_spaceのlow,highではない)
+            "pick_pos":spaces.Box(low=np.array([-0.2,0.0,-0.2]),high=np.array([0.2,0.05,0.2]),dtype=np.float32),
+            "place_pos":spaces.Box(low=np.array([-0.2,0.01,-0.2]),high=np.array([0.2,0.05,0.2]),dtype=np.float32),
+        })
+        self.get_cached_configs_and_states(cached_states_path, self.num_variations)
+        self._initialize_env()
+
+    def _initialize_env(self):
+        camera_config = {
+            'camera_name': 'default_camera',
+            'camera_params': {
+                'default_camera': {
+                    'pos': np.array([0, 0.55, 0]),
+                    'angle': np.array([0, -90 / 180 * np.pi, 0]),
+                    'width': self.camera_width,
+                    'height': self.camera_height
+                }
+            }
+        }
+        self.update_camera(camera_config['camera_name'], camera_config['camera_params'][camera_config['camera_name']])
+
+    def generate_env_variation(self, num_variations=1, vary_cloth_size=True,max_wait_step=100,stable_vel_threshold=0.25):
+        """
+        Generate initial states for the environment.
+        Note: This will also change the current states!
+
+        Parameters
+        ----------
+        num_variations : int, optional
+            Number of generated variations, by default 1
+        vary_cloth_size : bool, optional
+            Make cloth size random or not, by default True 
+        max_wait_step : int, optional
+            Maximum number of steps waiting for the cloth to stabilize, by default 100
+        stable_vel_threshold : float, optional
+            Cloth stable when all particles' vel are smaller than this, by default 0.25
+
+        Returns
+        -------
+        Tuple[List[Dict[str,Any]], List[np.ndarray]]
+            Tuple of generated configs and states.
+        """        
+        
+        #TODO: 布のサイズをrandomizeする場合の処理を追加
         generated_configs, generated_states = [], []
         default_config = self.get_default_config()
 
@@ -39,36 +91,22 @@ class GarmentFlattenEnv(ClothEnv):
             self.set_scene(config)
             self._set_to_flat()
             self.move_to_pos([0, 0.05, 0])
-            for _ in range(10):
-                pyflex.step()
-                # img = self.get_image()
-                # cv2.imshow("image", img)
-                # cv2.waitKey()
+
+            # 布が安定するまで待つ
+            self._wait_for_stable(max_wait_step,stable_vel_threshold)
+
             self.action_tool.reset([0., -1., 0.])
             pos = pyflex.get_positions().reshape(-1, 4)
-            # pos[:, :3] -= np.mean(pos, axis=0)[:3]
-            # if self.action_mode in ['sawyer', 'franka']:  # Take care of the table in robot case
-            #     pos[:, 1] = 0.57
-            # else:
-            #     pos[:, 1] = 0.005
-            # pyflex.set_positions(pos.flatten())
-            # pyflex.set_velocities(np.zeros_like(pos))
-            # pyflex.step()
 
             num_particle = pos.shape[0]
             pickpoint = random.randint(0, num_particle - 1)
             curr_pos = pyflex.get_positions()
             original_inv_mass = curr_pos[pickpoint * 4 + 3]
             curr_pos[pickpoint * 4 + 3] = 0  # Set the mass of the pickup point to infinity so that it generates enough force to the rest of the cloth
-            # pickpoint_pos = curr_pos[pickpoint * 4: pickpoint * 4 + 3].copy()  # Pos of the pickup point is fixed to this point
-            # pickpoint_pos[1] += np.random.random(1) * 0.5 + 0.5
-            # pickpoint_pos[1] +=  0.3
             pyflex.set_positions(curr_pos)
 
-            # Pick up the cloth and wait to stablize
+            # Pick up the cloth and wait to stabilize
             obs = self._get_obs()
-            # cv2.imshow("obs", obs)
-            # cv2.waitKey()
             for pick_idx in range(1):
                 pickup_t = 20
                 for _ in range(pickup_t):
@@ -80,38 +118,18 @@ class GarmentFlattenEnv(ClothEnv):
                     pyflex.set_velocities(curr_vel)
                     pyflex.step()
                     obs = self._get_obs()
-                    # cv2.imshow("pick up obs", obs)
-                    # cv2.waitKey()
 
-                # for j in range(0, max_wait_step):
-                #     curr_pos = pyflex.get_positions()
-                #     curr_vel = pyflex.get_velocities()
-                #     curr_pos[pickpoint * 4: pickpoint * 4 + 3] = pickpoint_pos
-                #     curr_vel[pickpoint * 3: pickpoint * 3 + 3] = [0, 0, 0]
-                #     pyflex.set_positions(curr_pos)
-                #     pyflex.set_velocities(curr_vel)
-                #     pyflex.step()
-                #     obs = self._get_obs()
-                #     cv2.imshow("obs", obs)
-                #     cv2.waitKey()
-                #     if np.alltrue(np.abs(curr_vel) < stable_vel_threshold) and j > 5:
-                #         break
-
-                # Drop the cloth and wait to stablize
                 curr_pos = pyflex.get_positions()
                 curr_pos[pickpoint * 4 + 3] = original_inv_mass
                 pyflex.set_positions(curr_pos)
                 for _ in range(max_wait_step):
                     obs = self._get_obs()
-                    # cv2.imshow("wait obs", obs)
-                    # cv2.waitKey()
                     pyflex.step()
                     curr_vel = pyflex.get_velocities()
                     if np.alltrue(curr_vel < stable_vel_threshold):
                         break
 
             center_object()
-
             if self.action_mode == 'sphere' or self.action_mode.startswith('picker'):
                 curr_pos = pyflex.get_positions()
                 self.action_tool.reset(curr_pos[pickpoint * 4:pickpoint * 4 + 3] + [0., 0.2, 0.])
@@ -126,7 +144,47 @@ class GarmentFlattenEnv(ClothEnv):
 
             print('config {}: camera params {}, flatten area: {}'.format(i, config['camera_params'], generated_configs[-1]['flatten_area']))
 
+
         return generated_configs, generated_states
+    
+    def _wait_for_stable(self,max_wait_steps:int = 100,stable_vel_threshold:float = 0.25):
+        """
+        Wait for the cloth to stabilize.
+
+        Parameters
+        ----------
+        max_wait_steps : int, optional
+            Maximum number of steps waiting for the cloth to stabilize, by default 100
+        stable_vel_threshold : float, optional
+            Cloth stable when all particles' vel are smaller than this, by default 0.25
+        """
+        # wait for stabilization
+        for _ in range(max_wait_steps):
+            pyflex.step()
+            curr_vel = pyflex.get_velocities()
+            if np.alltrue(np.abs(curr_vel) < stable_vel_threshold):
+                break
+    def reset(self, to_flat=True):
+        """
+        Reset the environment.
+
+        Parameters
+        ----------
+        to_flat : bool, optional
+            Whether to reset the cloth to flat state or not, by default True
+
+        Returns
+        -------
+        np.ndarray
+            Observation of the environment.
+        """
+        #obs = super(GarmentFlattenEnv,self).reset()
+        obs = super().reset()
+        
+        if to_flat:
+            self._set_to_flat()
+            
+        return obs
 
     def _reset(self):
         """ Right now only use one initial state"""
@@ -173,6 +231,63 @@ class GarmentFlattenEnv(ClothEnv):
             else:
                 pyflex.step()
         return
+    
+    def step(self, action):
+        pick_pos = action["pick_pos"]
+        place_pos = action["place_pos"]
+        
+        
+        self._perform_picking_action(pick_pos,place_pos)
+        self._wait_for_stable()
+        
+        null_action = np.zeros(4)
+        obs,reward,done,info = super().step(null_action)
+        return obs, reward, done, info
+
+    def normalize_action(self,action:Dict[str,np.ndarray])->Dict[str,np.ndarray]:
+        #環境に合わせてactionの値を[-1,1]に正規化
+        pick_pos = action["pick_pos"] /[0.2,0.05,0.2]
+        place_pos = action["place_pos"]/[0.2,0.05,0.2]
+        return {"pick_pos":pick_pos,"place_pos":place_pos}
+    
+    def denormalize_action(self,action:Dict[str,np.ndarray])->Dict[str,np.ndarray]:
+        #[-1,1](zに関しては[0,1])で正規化されているactionの値を環境に合わせて変換
+        pick_pos = action["pick_pos"] * [0.2,0.05,0.2] 
+        place_pos = action["place_pos"] * [0.2,0.05,0.2] 
+        return {"pick_pos":pick_pos,"place_pos":place_pos}
+    
+    def _perform_picking_action(self, pick_pos: np.ndarray, place_pos:np.ndarray,move_time_steps:int = 40):
+        total_movement = place_pos - pick_pos
+        one_step_movement = total_movement / move_time_steps
+
+        action = np.zeros((move_time_steps, 4))
+        action[:, 3] = 1 #pick
+        #action[:, [0, 2]] = one_step_movement
+        action[:,0:3] = one_step_movement.reshape(1,-1)
+        
+        # move picker to the target position
+        shape_states = pyflex.get_shape_states().reshape((-1, 14))
+        shape_states[0, :3] = pick_pos
+        shape_states[0, 7:10] = pick_pos
+
+        pyflex.set_shape_states(shape_states)
+        pyflex.step()
+
+        # pick and move
+        for a in action:
+            _, _, _, _ = super().step(a)
+        # release
+        a = np.zeros(4)
+        _, _, _, _ = super().step(a)
+        
+    def sample_pick_pos(self)->np.ndarray:
+        #布の点をランダムに選択して確実に持てる位置を選ぶ
+        particle_pos= np.array(pyflex.get_positions()).reshape(-1, 4)[:,:3]
+        pick_idx = np.random.randint(0, len(particle_pos))
+        picking_pos = particle_pos[pick_idx]
+        #ちょっと上めを持つ
+        picking_pos[1] += 0.01
+        return picking_pos
 
     def _get_current_covered_area(self, pos):
         """
@@ -383,148 +498,198 @@ class GarmentFlattenEnv(ClothEnv):
         pyflex.set_positions(pos)
 
 
+
+
 if __name__ == '__main__':
     from softgym.registered_env import env_arg_dict
     from softgym.registered_env import SOFTGYM_ENVS
-    import copy
-    import cv2
+    import imageio
+    
+    def get_softgym_env_args(env_name = 'GarmentFlatten') -> dict:
+        args:Dict = env_arg_dict[env_name].copy()
+        args.update({
+            'env_name': env_name,
+            'render_mode': 'cloth',
+            'observation_mode': 'cam_rgb',
+            'render': True,
+            'camera_height': 64,
+            'camera_width': 64,
+            'camera_name': 'default_camera',
+            'horizon': 10000,
+            'headless': True,
+            'action_repeat': 1,
+            'picker_radius': 0.0001,
+            'picker_threshold': 0.015,#0.00625,
+            'cached_states_path': 'tshirt_flatten_cfm_init_states_small_2021_05_28_01_16.pkl',
+            'num_variations': 1,
+            'use_cached_states': False,
+            'save_cached_states': False,
+            'cloth_type': 'tshirt-small'
+        })
+        return args
+
+    env_name = 'GarmentFlatten'
+    softgym_env_args = get_softgym_env_args(env_name)
+    env:GarmentFlattenEnv = SOFTGYM_ENVS[env_name](**softgym_env_args)
+    
+    obs = env.reset()
+    
+    history = [obs]
+    
+    for i in range(1,5):
+        action = env.action_space.sample()
+        action['pick_pos'] = env.sample_pick_pos()
+        obs, reward, done, _ = env.step(action)
+        history.append(env.render("rgb_array")) #布と地面を描画
+        #history.append(env.render_cloth()) #布だけを描画
+    env.close()
+    
+    
+    # 画像を保存
+    if not os.path.exists("images"):
+        os.mkdir("images")
+    for i, obs in enumerate(history):
+        imageio.imwrite(f"images/{i}.png", obs)
+    
+    # import copy
+    # import cv2
 
 
-    def prepare_policy(env):
-        print("preparing policy! ", flush=True)
+    # def prepare_policy(env):
+    #     print("preparing policy! ", flush=True)
 
-        # move one of the picker to be under ground
-        shape_states = pyflex.get_shape_states().reshape(-1, 14)
-        shape_states[1, :3] = -1
-        shape_states[1, 7:10] = -1
+    #     # move one of the picker to be under ground
+    #     shape_states = pyflex.get_shape_states().reshape(-1, 14)
+    #     shape_states[1, :3] = -1
+    #     shape_states[1, 7:10] = -1
 
-        # move another picker to be above the cloth
-        pos = pyflex.get_positions().reshape((-1, 4))[:, :3]
-        pp = np.random.randint(len(pos))
-        shape_states[0, :3] = pos[pp] + [0., 0.06, 0.]
-        shape_states[0, 7:10] = pos[pp] + [0., 0.06, 0.]
-        pyflex.set_shape_states(shape_states.flatten())
+    #     # move another picker to be above the cloth
+    #     pos = pyflex.get_positions().reshape((-1, 4))[:, :3]
+    #     pp = np.random.randint(len(pos))
+    #     shape_states[0, :3] = pos[pp] + [0., 0.06, 0.]
+    #     shape_states[0, 7:10] = pos[pp] + [0., 0.06, 0.]
+    #     pyflex.set_shape_states(shape_states.flatten())
 
 
-    env_name = 'TshirtFlattenCFM'
-    env_args = copy.deepcopy(env_arg_dict[env_name])
-    env_args['render_mode'] = 'cloth'
-    env_args['observation_mode'] = 'cam_rgb'
-    env_args['render'] = True
-    env_args['camera_height'] = 720 #128
-    env_args['camera_width'] = 720#128
-    env_args['camera_name'] ='default_camera'
-    env_args['headless'] = True
-    env_args['action_repeat'] = 1
-    env_args['picker_radius'] = 0.01
-    env_args['picker_threshold'] = 0.00625
-    env_args['cached_states_path'] = 'tshirt_flatten_cfm_init_states_small_2021_05_28_01_16.pkl'
-    env_args['num_variations'] = 1
-    env_args['use_cached_states'] = False
-    env_args['save_cached_states'] = False
-    env_args['cloth_type'] = 'tshirt-small'
-    # pkl_path = './softgym/cached_initial_states/shorts_flatten.pkl'
+    # env_name = 'TshirtFlattenCFM'
+    # env_args = copy.deepcopy(env_arg_dict[env_name])
+    # env_args['render_mode'] = 'cloth'
+    # env_args['observation_mode'] = 'cam_rgb'
+    # env_args['render'] = True
+    # env_args['camera_height'] = 720 #128
+    # env_args['camera_width'] = 720#128
+    # env_args['camera_name'] ='default_camera'
+    # env_args['headless'] = True
+    # env_args['action_repeat'] = 1
+    # env_args['picker_radius'] = 0.01
+    # env_args['picker_threshold'] = 0.00625
+    # env_args['cached_states_path'] = 'tshirt_flatten_cfm_init_states_small_2021_05_28_01_16.pkl'
+    # env_args['num_variations'] = 1
+    # env_args['use_cached_states'] = False
+    # env_args['save_cached_states'] = False
+    # env_args['cloth_type'] = 'tshirt-small'
+    # # pkl_path = './softgym/cached_initial_states/shorts_flatten.pkl'
 
-    env = SOFTGYM_ENVS[env_name](**env_args)
-    print("before reset")
-    env.reset()
-    print("after reset")
-    env._set_to_flat()
-    print("after reset")
-    # env.move_to_pos([0, 0.1, 0])
+    # env = SOFTGYM_ENVS[env_name](**env_args)
+    # print("before reset")
+    # env.reset()
+    # print("after reset")
+    # env._set_to_flat()
+    # print("after reset")
+    # # env.move_to_pos([0, 0.1, 0])
+    # # pyflex.step()
+    # # i = 0
+    # # import pickle
+
+    # # while (1):
+    # #     pyflex.step(render=True)
+    # #     if i % 500 == 0:
+    # #         print('saving pkl to ' + pkl_path)
+    # #         pos = pyflex.get_positions()
+    # #         with open(pkl_path, 'wb') as f:
+    # #             pickle.dump(pos, f)
+    # #     i += 1
+    # #     print(i)
+
+    # obs = env._get_obs()
+    # cv2.imwrite('./small_tshirt.png', obs)
+    # # cv2.imshow('obs', obs)
+    # # cv2.waitKey()
+
+    # prepare_policy(env)
+
+    # particle_positions = pyflex.get_positions().reshape(-1, 4)[:, :3]
+    # n_particles = particle_positions.shape[0]
+    # # p_idx = np.random.randint(0, n_particles)
+    # # p_idx = 100
+    # pos = particle_positions
+    # ok = False
+    # while not ok:
+    #     pp = np.random.randint(len(pos))
+    #     if np.any(np.logical_and(np.logical_and(np.abs(pos[:, 0] - pos[pp][0]) < 0.00625, np.abs(pos[:, 2] - pos[pp][2]) < 0.00625),
+    #                              pos[:, 1] > pos[pp][1])):
+    #         ok = False
+    #     else:
+    #         ok = True
+    # picker_pos = particle_positions[pp] + [0, 0.01, 0]
+
+    # timestep = 50
+    # movement = np.random.uniform(0, 1, size=(3)) * 0.4 / timestep
+    # movement = np.array([0.2, 0.2, 0.2]) / timestep
+    # action = np.zeros((timestep, 8))
+    # action[:, 3] = 1
+    # action[:, :3] = movement
+
+    # shape_states = pyflex.get_shape_states().reshape((-1, 14))
+    # shape_states[1, :3] = -1
+    # shape_states[1, 7:10] = -1
+
+    # shape_states[0, :3] = picker_pos
+    # shape_states[0, 7:10] = picker_pos
+
+    # pyflex.set_shape_states(shape_states)
     # pyflex.step()
-    # i = 0
-    # import pickle
 
-    # while (1):
-    #     pyflex.step(render=True)
-    #     if i % 500 == 0:
-    #         print('saving pkl to ' + pkl_path)
-    #         pos = pyflex.get_positions()
-    #         with open(pkl_path, 'wb') as f:
-    #             pickle.dump(pos, f)
-    #     i += 1
-    #     print(i)
+    # obs_list = []
 
-    obs = env._get_obs()
-    cv2.imwrite('./small_tshirt.png', obs)
-    # cv2.imshow('obs', obs)
-    # cv2.waitKey()
+    # for a in action:
+    #     obs, _, _, _ = env.step(a)
+    #     obs_list.append(obs)
+    #     # cv2.imshow("move obs", obs)
+    #     # cv2.waitKey()
 
-    prepare_policy(env)
+    # for t in range(30):
+    #     a = np.zeros(8)
+    #     obs, _, _, _ = env.step(a)
+    #     obs_list.append(obs)
+    #     # cv2.imshow("move obs", obs)
+    #     # cv2.waitKey()
 
-    particle_positions = pyflex.get_positions().reshape(-1, 4)[:, :3]
-    n_particles = particle_positions.shape[0]
-    # p_idx = np.random.randint(0, n_particles)
-    # p_idx = 100
-    pos = particle_positions
-    ok = False
-    while not ok:
-        pp = np.random.randint(len(pos))
-        if np.any(np.logical_and(np.logical_and(np.abs(pos[:, 0] - pos[pp][0]) < 0.00625, np.abs(pos[:, 2] - pos[pp][2]) < 0.00625),
-                                 pos[:, 1] > pos[pp][1])):
-            ok = False
-        else:
-            ok = True
-    picker_pos = particle_positions[pp] + [0, 0.01, 0]
+    # from softgym.utils.visualization import save_numpy_as_gif
 
-    timestep = 50
-    movement = np.random.uniform(0, 1, size=(3)) * 0.4 / timestep
-    movement = np.array([0.2, 0.2, 0.2]) / timestep
-    action = np.zeros((timestep, 8))
-    action[:, 3] = 1
-    action[:, :3] = movement
+    # save_numpy_as_gif(np.array(obs_list), '{}.gif'.format(
+    #     env_args['cloth_type']
+    # ))
+    # print("before reset")
+    # env.reset()
+    # print("after reset")
+    # pyflex.set_shape_states(shape_states)
+    # pyflex.step()
 
-    shape_states = pyflex.get_shape_states().reshape((-1, 14))
-    shape_states[1, :3] = -1
-    shape_states[1, 7:10] = -1
+    # obs_list = []
 
-    shape_states[0, :3] = picker_pos
-    shape_states[0, 7:10] = picker_pos
+    # for a in action:
+    #     obs, _, _, _ = env.step(a)
+    #     obs_list.append(obs)
+    #     # cv2.imshow("move obs", obs)
+    #     # cv2.waitKey()
 
-    pyflex.set_shape_states(shape_states)
-    pyflex.step()
-
-    obs_list = []
-
-    for a in action:
-        obs, _, _, _ = env.step(a)
-        obs_list.append(obs)
-        # cv2.imshow("move obs", obs)
-        # cv2.waitKey()
-
-    for t in range(30):
-        a = np.zeros(8)
-        obs, _, _, _ = env.step(a)
-        obs_list.append(obs)
-        # cv2.imshow("move obs", obs)
-        # cv2.waitKey()
-
-    from softgym.utils.visualization import save_numpy_as_gif
-
-    save_numpy_as_gif(np.array(obs_list), '{}.gif'.format(
-        env_args['cloth_type']
-    ))
-    print("before reset")
-    env.reset()
-    print("after reset")
-    pyflex.set_shape_states(shape_states)
-    pyflex.step()
-
-    obs_list = []
-
-    for a in action:
-        obs, _, _, _ = env.step(a)
-        obs_list.append(obs)
-        # cv2.imshow("move obs", obs)
-        # cv2.waitKey()
-
-    for t in range(30):
-        a = np.zeros(8)
-        obs, _, _, _ = env.step(a)
-        obs_list.append(obs)
-        # cv2.imshow("move obs", obs)
-        # cv2.waitKey()
-    save_numpy_as_gif(np.array(obs_list), '{}_2.gif'.format(
-        env_args['cloth_type']
-    ))
+    # for t in range(30):
+    #     a = np.zeros(8)
+    #     obs, _, _, _ = env.step(a)
+    #     obs_list.append(obs)
+    #     # cv2.imshow("move obs", obs)
+    #     # cv2.waitKey()
+    # save_numpy_as_gif(np.array(obs_list), '{}_2.gif'.format(
+    #     env_args['cloth_type']
+    # ))
