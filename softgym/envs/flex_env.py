@@ -282,7 +282,7 @@ class FlexEnv(gym.Env):
         pos_flat = pyflex.get_positions()
         return pos_flat.reshape(-1, 4)
     
-    def get_velicities(self)->np.ndarray:
+    def get_velocities(self)->np.ndarray:
         """
         Get the velocities of all particles in the scene
 

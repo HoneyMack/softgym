@@ -84,65 +84,65 @@ class GarmentFlattenEnv(ClothEnv):
         #TODO: 布のサイズをrandomizeする場合の処理を追加
         generated_configs, generated_states = [], []
         default_config = self.get_default_config()
+        
 
-        for i in range(num_variations):
+        for var_idx in range(num_variations):
             config = deepcopy(default_config)
             self.update_camera(config['camera_name'], config['camera_params'][config['camera_name']])
             self.set_scene(config)
-            self._set_to_flat()
+            max_flatten_area = self._set_to_flat()# 布が完全に広がったときの領域も保持
+            config["flatten_area"] = max_flatten_area
+            
+            # 布をカメラ内に移動
             self.move_to_pos([0, 0.05, 0])
 
             # 布が安定するまで待つ
             self._wait_for_stable(max_wait_step,stable_vel_threshold)
 
             self.action_tool.reset([0., -1., 0.])
-            pos = pyflex.get_positions().reshape(-1, 4)
-
+            # 服の1点を持ち上げて落とす
+            pos = self.get_positions()
             num_particle = pos.shape[0]
-            pickpoint = random.randint(0, num_particle - 1)
-            curr_pos = pyflex.get_positions()
-            original_inv_mass = curr_pos[pickpoint * 4 + 3]
-            curr_pos[pickpoint * 4 + 3] = 0  # Set the mass of the pickup point to infinity so that it generates enough force to the rest of the cloth
-            pyflex.set_positions(curr_pos)
+            pick_idx = random.randint(0, num_particle - 1)
+            
+            inv_mass_original = pos[pick_idx,3]
+            pos[pick_idx,3] = 0  # Set the mass of the pickup point to infinity so that it generates enough force to the rest of the cloth
+            self.set_positions(pos)
+            
+            # 持ち上げる
+            pickup_t = 20 # Number of steps to pick up the cloth
+            pickup_height = 0.2 # Height to pick up the cloth
+            for _ in range(pickup_t):
+                curr_pos = self.get_positions()
+                curr_vel = self.get_velocities()
+                curr_pos[pick_idx,1] += pickup_height / pickup_t
+                curr_vel[pick_idx,:3] = [0, 0, 0] # Set the velocity of the pickup point to zero
+                self.set_positions(curr_pos)
+                self.set_velocities(curr_vel)
+                self.step_simulation()
 
-            # Pick up the cloth and wait to stabilize
-            obs = self._get_obs()
-            for pick_idx in range(1):
-                pickup_t = 20
-                for _ in range(pickup_t):
-                    curr_pos = pyflex.get_positions()
-                    curr_vel = pyflex.get_velocities()
-                    curr_pos[pickpoint * 4 + 1] += 0.2 / pickup_t
-                    curr_vel[pickpoint * 3: pickpoint * 3 + 3] = [0, 0, 0]
-                    pyflex.set_positions(curr_pos)
-                    pyflex.set_velocities(curr_vel)
-                    pyflex.step()
-                    obs = self._get_obs()
-
-                curr_pos = pyflex.get_positions()
-                curr_pos[pickpoint * 4 + 3] = original_inv_mass
-                pyflex.set_positions(curr_pos)
-                for _ in range(max_wait_step):
-                    obs = self._get_obs()
-                    pyflex.step()
-                    curr_vel = pyflex.get_velocities()
-                    if np.alltrue(curr_vel < stable_vel_threshold):
-                        break
-
+            # 落とす
+            ## 持ち上げていた点の質量を元に戻す
+            curr_pos = self.get_positions()
+            curr_pos[pick_idx,3] = inv_mass_original
+            self.set_positions(curr_pos)
+            ## 安定するまで待つ
+            self._wait_for_stable(max_wait_step,stable_vel_threshold) 
+            
+            # 布を中央に
             center_object()
+            
+            # pickerの位置を初期化
             if self.action_mode == 'sphere' or self.action_mode.startswith('picker'):
-                curr_pos = pyflex.get_positions()
-                self.action_tool.reset(curr_pos[pickpoint * 4:pickpoint * 4 + 3] + [0., 0.2, 0.])
+                picker_pos = curr_pos[pick_idx,:3] + [0., 0.2, 0.]
+                self.action_tool.reset(picker_pos)
+                
             generated_configs.append(deepcopy(config))
             generated_states.append(deepcopy(self.get_state()))
             self.current_config = config  # Needed in _set_to_flatten function
 
-            if self.cloth_type == 'tshirt' or self.cloth_type == 'tshirt-small':  # Use first frame as the flattened for tshirt and use the manual state for shorts
-                generated_configs[-1]['flatten_area'] = self._set_to_flat(pos=pos)  # Record the maximum flatten area
-            elif self.cloth_type == 'shorts':
-                generated_configs[-1]['flatten_area'] = self._set_to_flat()  # Record the maximum flatten area
-
-            print('config {}: camera params {}, flatten area: {}'.format(i, config['camera_params'], generated_configs[-1]['flatten_area']))
+            
+            print('config {}: camera params {}, flatten area: {}'.format(var_idx, config['camera_params'], generated_configs[-1]['flatten_area']))
 
 
         return generated_configs, generated_states
@@ -532,7 +532,7 @@ if __name__ == '__main__':
     softgym_env_args = get_softgym_env_args(env_name)
     env:GarmentFlattenEnv = SOFTGYM_ENVS[env_name](**softgym_env_args)
     
-    obs = env.reset()
+    obs = env.reset(to_flat=False)
     
     history = [obs]
     
