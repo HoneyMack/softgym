@@ -1,3 +1,4 @@
+from collections import defaultdict
 import numpy as np
 import random
 import pyflex
@@ -28,10 +29,12 @@ class GarmentFlattenEnv(ClothEnv):
         kwargs : dict
             keyword arguments for ClothEnv.
         """
-        super().__init__(**kwargs)
-
+        ##### Need to set before super().__init__()
         self.cloth_type = cloth_type
         self.prev_covered_area = None  # Should not be used until initialized, used for computing reward
+        #####
+        
+        super().__init__(**kwargs)
         
         # action spaceの上書き
         self.action_space = spaces.Dict({
@@ -168,26 +171,6 @@ class GarmentFlattenEnv(ClothEnv):
             # TODO ad action_repeat
             print('Need to add action repeat')
             raise NotImplementedError
-            raise DeprecationWarning
-            valid_idxs = np.array([0, 63, 31 * 64, 32 * 64 - 1])
-            last_pos = np.array(pyflex.get_positions()).reshape([-1, 4])
-            pyflex.step()
-
-            cur_pos = np.array(pyflex.get_positions()).reshape([-1, 4])
-            action = action.reshape([-1, 4])
-            idxs = np.hstack(action[:, 0])
-            updates = action[:, 1:]
-            action = np.hstack([action, np.zeros([action.shape[0], 1])])
-            vels = pyflex.get_velocities()
-            cur_pos[:, 3] = 1
-            if self.action_mode == 'key_point_pos':
-                cur_pos[valid_idxs[idxs.astype(int)], :3] = last_pos[valid_idxs[idxs.astype(int)]][:, :3] + updates
-                cur_pos[valid_idxs[idxs.astype(int)], 3] = 0
-            else:
-                vels = np.array(vels).reshape([-1, 3])
-                vels[idxs.astype(int), :] = updates
-            pyflex.set_positions(cur_pos.flatten())
-            pyflex.set_velocities(vels.flatten())
         else:
             self.action_tool.step(action)
             if self.action_mode in ['sawyer', 'franka']:
@@ -266,7 +249,7 @@ class GarmentFlattenEnv(ClothEnv):
         
     def sample_pick_pos(self)->np.ndarray:
         #布の点をランダムに選択して確実に持てる位置を選ぶ
-        particle_pos= np.array(pyflex.get_positions()).reshape(-1, 4)[:,:3]
+        particle_pos= self.get_positions()[:,:3]
         pick_idx = np.random.randint(0, len(particle_pos))
         picking_pos = particle_pos[pick_idx]
         #ちょっと上めを持つ
@@ -386,8 +369,14 @@ class GarmentFlattenEnv(ClothEnv):
         elif self.version == 1:
             pyflex.set_scene(env_idx, scene_params, 0)
 
-        self.rotate_particles([0, 0, -90])
-        self.move_to_pos([0, 0.05, 0])
+
+        # 衣服の種類に応じて回転
+        if cloth_type == 10:
+            self.rotate_particles([0, 0, 90])
+            self.move_to_pos([0, 0.04, 0])
+        else:
+            self.rotate_particles([0, 0, -90])
+            self.move_to_pos([0, 0.05, 0])
         
         self._wait_for_stable()
         
@@ -407,13 +396,17 @@ class GarmentFlattenEnv(ClothEnv):
         Dict[str, Any]
             Default config of the environment.
         """
+        #各服のスケール
+        cloth_scales = defaultdict(lambda: -1)
+        cloth_scales["tank_male"] = 0.004
+        
         # 布に関するconfig
         config_cloth = {
             'pos': [0.01, 0.15, 0.01],
-            'scale': 0.5,#-1,
+            'scale': cloth_scales[self.cloth_type],
             'rot': 0.0,
             'vel': [0., 0., 0.],
-            'stiff': 1.0*1e-1,
+            'stiff': 2.0*1e-1,
             'mass': 0.5 / (40 * 40)*((1e-1)**2),
             'radius': self.cloth_particle_radius,  # / 1.8,
             'cloth_type': 0
