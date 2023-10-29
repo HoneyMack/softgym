@@ -336,6 +336,8 @@ public:
             cloth_prefix = "tshirt";
         else if (cloth_type==1)
             cloth_prefix = "shorts";
+        else if (cloth_type==10) //2023/10/29:タンクトップ広げタスク用に追加
+            cloth_prefix = "tank_male";
         else
             cloth_prefix = "Tshirt_obj";
 
