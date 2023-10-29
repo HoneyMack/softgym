@@ -48,6 +48,7 @@ class FlexEnv(gym.Env):
         self.use_cached_states = use_cached_states
         self.save_cached_states = save_cached_states
         self.current_config = self.get_default_config()
+        self.camera_params = self.current_config['camera_params']
         self.current_config_id = None
         self.cached_configs, self.cached_init_states = None, None
         self.num_variations = num_variations
@@ -71,32 +72,57 @@ class FlexEnv(gym.Env):
         :param cached_states_path:
         :return:
         """
+        # Check if the cache already exists
         if self.cached_configs is not None and self.cached_init_states is not None and len(self.cached_configs) == num_variations:
             return self.cached_configs, self.cached_init_states
+        
+        # Current cache is not valid, load from file
+        ## If cashed_states_path is relative path, Make it absolute path
         if not cached_states_path.startswith('/'):
             cur_dir = osp.dirname(osp.abspath(__file__))
             cached_states_path = osp.join(cur_dir, '../cached_initial_states', cached_states_path)
-        if self.use_cached_states and osp.exists(cached_states_path):
-            # Load from cached file
-            with open(cached_states_path, "rb") as handle:
-                self.cached_configs, self.cached_init_states = pickle.load(handle)
-            print('{} config and state pairs loaded from {}'.format(len(self.cached_init_states), cached_states_path))
-            all_camera_params = self.get_default_config()['camera_params']
-            self.camera_params = all_camera_params
-            for i in range(len(self.cached_configs)):
-                self.cached_configs[i]['camera_params'] = all_camera_params
-                self.cached_configs[i]['camera_params'][self.camera_name]['width'] = self.camera_width
-                self.cached_configs[i]['camera_params'][self.camera_name]['height'] = self.camera_height
-                if self.camera_name not in self.cached_init_states[i]['camera_params']:
-                    self.cached_init_states[i]['camera_params'][self.camera_name] = all_camera_params[self.camera_name]
+        
+        # Use cached states if use_cached_states is True
+        if self.use_cached_states:
+            # If cached_states_path exist, load from it
+            if osp.exists(cached_states_path):
+                # Load from cached file
+                with open(cached_states_path, "rb") as handle:
+                    self.cached_configs, self.cached_init_states = pickle.load(handle)
+                print('{} config and state pairs loaded from {}'.format(len(self.cached_init_states), cached_states_path))
+                all_camera_params = self.get_default_config()['camera_params']
+                self.camera_params = all_camera_params
+                
+                # Update cached_configs
+                for i in range(len(self.cached_configs)):
+                    # Update the camera params in the cached_configs
+                    self.cached_configs[i]['camera_params'] = all_camera_params
+                    self.cached_configs[i]['camera_params'][self.camera_name]['width'] = self.camera_width
+                    self.cached_configs[i]['camera_params'][self.camera_name]['height'] = self.camera_height
+                    
+                    # Update the camera params in the cached_init_states
+                    if self.camera_name not in self.cached_init_states[i]['camera_params']:
+                        self.cached_init_states[i]['camera_params'][self.camera_name] = all_camera_params[self.camera_name]
+                        
+                    self.cached_init_states[i]['camera_params'][self.camera_name]['width'] = self.camera_width
+                    self.cached_init_states[i]['camera_params'][self.camera_name]['height'] = self.camera_height
+                
+                # Check if the cached states are valid
+                if len(self.cached_configs) == num_variations:
+                    return self.cached_configs, self.cached_init_states
+            # If cached_states_path does not exist, generate new cached states
+            else:
+                print('Warning: cached_states_path {} does not exist. Generating new cached states'.format(cached_states_path))
 
-                self.cached_init_states[i]['camera_params'][self.camera_name]['width'] = self.camera_width
-                self.cached_init_states[i]['camera_params'][self.camera_name]['height'] = self.camera_height
-            if len(self.cached_configs) == num_variations:
-                return self.cached_configs, self.cached_init_states
-
+        ## If you do not use cached_states or cached_states_path does not exist, generate new cached states
         self.cached_configs, self.cached_init_states = self.generate_env_variation(num_variations)
+        
         if self.save_cached_states:
+            # If the directory does not exist, create it
+            if not osp.exists(osp.dirname(cached_states_path)):
+                os.makedirs(osp.dirname(cached_states_path))                
+                print('Directory created: {}'.format(osp.dirname(cached_states_path)))
+                
             with open(cached_states_path, 'wb+') as handle:
                 pickle.dump((self.cached_configs, self.cached_init_states), handle, protocol=pickle.HIGHEST_PROTOCOL)
             print('{} config and state pairs generated and saved to {}'.format(len(self.cached_init_states), cached_states_path))

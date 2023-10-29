@@ -14,7 +14,6 @@ import gym
 import gym.spaces as spaces
 
 #TODO:プログラムの整理・コメントの追加
-# 現状、tshirt_flatten_cfm.pyと同じ内容のファイル
 class GarmentFlattenEnv(ClothEnv):
     def __init__(self, cached_states_path='tshirt_flatten_init_states.pkl', cloth_type='tank_male', **kwargs):
         """
@@ -34,8 +33,6 @@ class GarmentFlattenEnv(ClothEnv):
         self.cloth_type = cloth_type
         self.prev_covered_area = None  # Should not be used until initialized, used for computing reward
         
-        self._initialize_env()
-        
         #action spaceの上書き
         self.action_space = spaces.Dict({
             #pick_posはcloth_envのpickerのlow,highを参考に合わせている(action_spaceのlow,highではない)
@@ -43,21 +40,7 @@ class GarmentFlattenEnv(ClothEnv):
             "place_pos":spaces.Box(low=np.array([-0.2,0.01,-0.2]),high=np.array([0.2,0.05,0.2]),dtype=np.float32),
         })
         self.get_cached_configs_and_states(cached_states_path, self.num_variations)
-        self._initialize_env()
-
-    def _initialize_env(self):
-        camera_config = {
-            'camera_name': 'default_camera',
-            'camera_params': {
-                'default_camera': {
-                    'pos': np.array([0, 0.55, 0]),
-                    'angle': np.array([0, -90 / 180 * np.pi, 0]),
-                    'width': self.camera_width,
-                    'height': self.camera_height
-                }
-            }
-        }
-        self.update_camera(camera_config['camera_name'], camera_config['camera_params'][camera_config['camera_name']])
+        
 
     def generate_env_variation(self, num_variations=1, vary_cloth_size=True,max_wait_step=100,stable_vel_threshold=0.25):
         """
@@ -139,9 +122,7 @@ class GarmentFlattenEnv(ClothEnv):
                 
             generated_configs.append(deepcopy(config))
             generated_states.append(deepcopy(self.get_state()))
-            self.current_config = config  # Needed in _set_to_flatten function
 
-            
             print('config {}: camera params {}, flatten area: {}'.format(var_idx, config['camera_params'], generated_configs[-1]['flatten_area']))
 
 
@@ -422,10 +403,16 @@ class GarmentFlattenEnv(ClothEnv):
         self.current_config = deepcopy(config)
 
     def get_default_config(self):
-        # cam_pos, cam_angle = np.array([0.0, 0.82, 0.00]), np.array([0, -np.pi/2., 0.])
-        cam_pos, cam_angle = np.array([-0.0, 0.82, 0.82]), np.array([0, -45 / 180. * np.pi, 0.])
+        """
+        Get the default config of the environment.
 
-        config = {
+        Returns
+        -------
+        Dict[str, Any]
+            Default config of the environment.
+        """
+        # 布に関するconfig
+        config_cloth = {
             'pos': [0.01, 0.15, 0.01],
             'scale': -1,
             'rot': 0.0,
@@ -433,29 +420,37 @@ class GarmentFlattenEnv(ClothEnv):
             'stiff': 1.0*1e-1,
             'mass': 0.5 / (40 * 40)*((1e-1)**2),
             'radius': self.cloth_particle_radius,  # / 1.8,
-            'camera_name': 'default_camera',
-            'camera_params': {'default_camera':
-                # {
-                #                 'pos': np.array([0, 0.55, 0]),
-                #                   'angle': np.array([0, -90 / 180 * np.pi, 0]),
-                #                   'width': self.camera_width,
-                #                   'height': self.camera_height},
-                                  {'pos': cam_pos,
-                                   'angle': cam_angle,
-                                   'width': self.camera_width,
-                                   'height': self.camera_height},
-                              'top_down_camera_full': {
-                                  'pos': np.array([0, 0.35, 0]),
-                                  'angle': np.array([0, -90 / 180 * np.pi, 0]),
-                                  'width': self.camera_width,
-                                  'height': self.camera_height
-                              },
-                              },
-            'drop_height': 0.0,
             'cloth_type': 0
-
         }
-
+        # カメラに関するconfig
+        config_camera = {
+            'camera_name': 'default_camera',
+            'camera_params': {
+                'default_camera':{
+                    'pos': np.array([-0.0, 0.82, 0.82]),
+                    'angle': np.array([0, -45 / 180. * np.pi, 0.]),
+                    'width': self.camera_width,
+                    'height': self.camera_height
+                },
+                'top_down_camera_full': {
+                    'pos': np.array([0, 0.55, 0]),
+                    'angle': np.array([0, -90 / 180 * np.pi, 0]),
+                    'width': self.camera_width,
+                    'height': self.camera_height
+                },
+            },
+        }
+        # その他のconfig
+        config_other ={
+            'drop_height': 0.2,
+        }
+        
+        # configの統合
+        config = {}
+        config.update(config_cloth)
+        config.update(config_camera)
+        config.update(config_other)
+        
         return config
 
     def rotate_particles(self, angle):
@@ -505,7 +500,7 @@ if __name__ == '__main__':
     from softgym.registered_env import SOFTGYM_ENVS
     import imageio
     
-    def get_softgym_env_args(env_name = 'GarmentFlatten') -> dict:
+    def get_softgym_env_args(env_name = 'GarmentFlatten',cloth_type='tshirt-small') -> dict:
         args:Dict = env_arg_dict[env_name].copy()
         args.update({
             'env_name': env_name,
@@ -514,18 +509,19 @@ if __name__ == '__main__':
             'render': True,
             'camera_height': 64,
             'camera_width': 64,
-            'camera_name': 'default_camera',
+            'camera_name': 'top_down_camera_full',
             'horizon': 10000,
             'headless': True,
             'action_repeat': 1,
             'picker_radius': 0.0001,
             'picker_threshold': 0.015,#0.00625,
-            'cached_states_path': 'tshirt_flatten_cfm_init_states_small_2021_05_28_01_16.pkl',
             'num_variations': 1,
-            'use_cached_states': False,
+            'cached_states_path': f"{env_name}_{cloth_type}_init_states.pkl",
+            'use_cached_states': True,
             'save_cached_states': False,
-            'cloth_type': 'tshirt-small'
+            'cloth_type': cloth_type,
         })
+        
         return args
 
     env_name = 'GarmentFlatten'
