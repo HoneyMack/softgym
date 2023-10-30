@@ -272,7 +272,7 @@ class PickerPickPlace(Picker):
         return model_actions, curr_pos
 
 
-from softgym.utils.gemo_utils import intrinsic_from_fov, get_rotation_matrix
+from softgym.utils.geom_utils import intrinsic_from_fov, get_rotation_matrix
 
 
 class PickerQPG(PickerPickPlace):

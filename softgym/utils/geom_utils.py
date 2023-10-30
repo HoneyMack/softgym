@@ -13,24 +13,41 @@ def pixel_coord_np(width, height):
     return np.vstack((x.flatten(), y.flatten(), np.ones_like(x.flatten())))
 
 
-def intrinsic_from_fov(height, width, fov=90):
-    """
-    Basic Pinhole Camera Model
-    intrinsic params from fov and sensor width and height in pixels
-    Returns:
-        K:      [4, 4]
-    """
-    px, py = (width / 2, height / 2)
-    hfov = fov / 360. * 2. * np.pi
-    fx = width / (2. * np.tan(hfov / 2.))
+def intrinsic_from_fov(height:int, width:int, fov=90)->np.ndarray:
+	"""
+	カメラをピンホールカメラとしたときの内部パラメータを計算する関数
 
-    vfov = 2. * np.arctan(np.tan(hfov / 2) * height / width)
-    fy = height / (2. * np.tan(vfov / 2.))
+	Parameters
+	----------
+	height : int
+		カメラの縦の画素数[px]
+	width : int
+		カメラの横の画素数[px]
+	fov : int, optional
+		水平方向の視野角, by default 90
 
-    return np.array([[fx, 0, px, 0.],
-                     [0, fy, py, 0.],
-                     [0, 0, 1., 0.],
-                     [0., 0., 0., 1.]])
+	Returns
+	-------
+	np.ndarray
+		K: 	内部パラメータ行列[4, 4]
+			(カメラ座標を画像座標に変換する行列)
+	"""
+	# 視野角・焦点距離fを計算
+	hfov = fov / 360. * 2. * np.pi # 水平方向の視野角[rad]
+	fx = (width / 2.) / np.tan(hfov / 2.)
+
+	## 垂直方向の視野角vfovをアスペクト比とhfovから計算
+	aspect = height / width
+	vfov = 2. * np.arctan(np.tan(hfov / 2) * aspect)# 垂直方向の視野角[rad]
+	fy = (height / 2.) / np.tan(vfov / 2.)
+ 
+	# 画像の中心座標
+	px, py = (width / 2, height / 2)
+
+	return np.array([[fx, 0, px, 0.],
+						[0, fy, py, 0.],
+						[0, 0, 1., 0.],
+						[0., 0., 0., 1.]])
 
 def get_rotation_matrix(angle, axis):
 	axis = axis / np.linalg.norm(axis)
