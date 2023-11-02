@@ -1406,8 +1406,8 @@ void RenderScene() {
         DrawMesh(g_mesh, g_meshColor);
     
     // printf("pass DrawMesh\n");
-    if (!g_clothOnly)
-        DrawShapes();
+    if (!g_clothOnly) 
+        DrawShapes();//この処理は床の描画には関係ない
     // printf("pass DrawShapes\n");
 
     if (g_drawCloth && g_buffers->triangles.size()) {
@@ -1467,7 +1467,8 @@ void RenderScene() {
                                       g_buffers->triangles.size() / 3, g_buffers->positions.size(), 3, g_expandCloth);
         } else
         {
-            DrawPlanes((Vec4 *) g_params.planes, g_params.numPlanes, g_drawPlaneBias);
+            //REMARK:ここで床を描画している.g_params.numPlanes=1で１枚の平面。市松模様なのは、平面描画がそのような設定になっているからだと思われる
+            DrawPlanes((Vec4 *) g_params.planes, g_params.numPlanes, g_drawPlaneBias); 
 
             if (g_drawMesh)
                 DrawMesh(g_mesh, g_meshColor);
