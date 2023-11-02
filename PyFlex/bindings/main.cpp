@@ -175,15 +175,28 @@ std::map<NvFlexDistanceFieldId, GpuMesh *> g_fields;
 bool g_shapesChanged = false;
 
 /* Note that this array of colors is altered by demo code, and is also read from global by graphics API impls */
+//ここの色で布の色が変更できる！
 Colour g_colors[] = {
-        Colour(0.000f, 0.500f, 1.000f),
-        Colour(0.875f, 0.782f, 0.051f),
-        Colour(0.800f, 0.100f, 0.100f),
-        Colour(0.673f, 0.111f, 0.000f),
-        Colour(0.612f, 0.194f, 0.394f),
-        Colour(0.0f, 1.f, 0.0f),
-        Colour(0.797f, 0.354f, 0.000f),
-        Colour(0.092f, 0.465f, 0.820f)
+        // Colour(0.000f, 0.500f, 1.000f),
+        // Colour(0.875f, 0.782f, 0.051f),
+        // Colour(0.800f, 0.100f, 0.100f),
+        // Colour(0.673f, 0.111f, 0.000f),
+        // Colour(0.612f, 0.194f, 0.394f),
+        // Colour(0.0f, 1.f, 0.0f),
+        // Colour(0.797f, 0.354f, 0.000f),
+        // Colour(0.092f, 0.465f, 0.820f)
+
+        Colour(0.0f, 0.0f, 0.0f),
+        Colour(0.0f, 0.0f, 0.0f),
+        Colour(0.0f, 0.0f, 0.0f),
+        // REMARK:順番が大事,idx=3が布の裏面の色,idx=4が布の表面の色(0-indexed)
+        // Colour(0.673f, 0.111f, 0.000f), //布の裏面の色
+        // Colour(0.612f, 0.194f, 0.394f), //布の表面の色
+        Colour(240.0f/255.0f, 200.0f/255.0f, 200.0f/255.0f)/1.5, //布の裏面の色
+        Colour(110.0f/255.0f, 25.0f/255.0f, 45.0f/255.0f)/2.0, //布の表面の色
+        Colour(0.0f, 0.0f, 0.0f),
+        Colour(0.0f, 0.0f, 0.0f),
+        Colour(0.0f, 0.0f, 0.0f)
 };
 
 //Colour g_colors[] = {
@@ -1337,7 +1350,7 @@ void RenderScene() {
     //---------------------------------------
     // setup view and state
 
-    float fov = kPi / 4.0f;
+    float fov = kPi / 4.0f; // 90 degrees
     float aspect = float(g_screenWidth) / g_screenHeight;
 
     Matrix44 proj = ProjectionMatrix(RadToDeg(fov), aspect, g_camNear, g_camFar);
@@ -1465,7 +1478,7 @@ void RenderScene() {
             if (g_drawCloth && g_buffers->triangles.size())
                 DrawCloth(&g_buffers->positions[0], &g_buffers->normals[0],
                           g_buffers->uvs.size() ? &g_buffers->uvs[0].x : nullptr, &g_buffers->triangles[0],
-                          g_buffers->triangles.size() / 3, g_buffers->positions.size(), 3, g_expandCloth);
+                          g_buffers->triangles.size() / 3, g_buffers->positions.size(), 3, g_expandCloth); //REMARK:ここの最後から２番めの引数でg_colorsのどの色を使うかを指定している
 
             if (g_drawRopes) {
                 for (size_t i = 0; i < g_ropes.size(); ++i)
