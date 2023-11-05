@@ -46,7 +46,7 @@ class GarmentFlattenEnv(ClothEnv):
         self.get_cached_configs_and_states(cached_states_path, self.num_variations)
         
 
-    def generate_env_variation(self, num_variations=1, vary_cloth_size=True,max_wait_step=100,stable_vel_threshold=0.25):
+    def generate_env_variation(self, num_variations=1, vary_cloth_size=True,max_wait_step=500,stable_vel_threshold=0.15):
         """
         Generate initial states for the environment.
         Note: This will also change the current states!
@@ -98,7 +98,7 @@ class GarmentFlattenEnv(ClothEnv):
             
             # 持ち上げる
             pickup_t = 20 # Number of steps to pick up the cloth
-            pickup_height = 0.2 # Height to pick up the cloth
+            pickup_height = 0.1 # Height to pick up the cloth
             for _ in range(pickup_t):
                 curr_pos = self.get_positions()
                 curr_vel = self.get_velocities()
@@ -505,7 +505,7 @@ if __name__ == '__main__':
         args.update({
             'env_name': env_name,
             'render_mode': 'cloth',
-            'observation_mode': 'cam_rgb',
+            'observation_mode': "cloth_rgb",#'cam_rgb',
             'render': True,
             'camera_height': 64,
             'camera_width': 64,
@@ -515,10 +515,10 @@ if __name__ == '__main__':
             'action_repeat': 1,
             'picker_radius': 0.0001,
             'picker_threshold': 0.015,#0.00625,
-            'num_variations': 1,
+            'num_variations': 1000,
             'cached_states_path': f"{env_name}_{cloth_type}_init_states.pkl",
-            'use_cached_states':  False,
-            'save_cached_states': True,
+            'use_cached_states':  True,
+            'save_cached_states': False,
             'cloth_type': cloth_type,
         })
         
@@ -537,8 +537,8 @@ if __name__ == '__main__':
         action = env.action_space.sample()
         action['pick_pos'] = env.sample_pick_pos()
         obs, reward, done, _ = env.step(action)
-        history.append(env.render("rgb_array")) #布と地面を描画
-        #history.append(env.render_cloth()) #布だけを描画
+        history.append(obs) #observation_modeに応じた描画
+
     env.close()
     
     
