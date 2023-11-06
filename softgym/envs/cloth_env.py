@@ -128,12 +128,34 @@ class ClothEnv(FlexEnv):
         rgb = rgb.reshape((self.camera_height, self.camera_width, 4))[::-1, :, :3]
         return rgb
     
-    
-    def get_depth(self):
-        _, depth = pyflex.render()
+    def get_cloth_depth(self)->np.ndarray:
+        _, depth = pyflex.render_cloth()
         depth[depth > 10] = 0.
         depth = depth.reshape((self.camera_height, self.camera_width))[::-1]
         return depth
+    
+    
+    def get_depth(self):
+        _, depth = pyflex.render()
+        depth = depth.reshape((self.camera_height, self.camera_width))[::-1]
+        return depth
+    
+    def get_cloth_mask(self)->np.ndarray:
+        """
+        布部分のマスクを取得する
+
+        Returns
+        -------
+        np.ndarray
+            布部分のマスク[height,width]
+                True: 布部分, False: 布以外
+        """
+        _, depth = pyflex.render_cloth()
+        depth = depth.reshape((self.camera_height, self.camera_width))[::-1]
+        depth[depth > 10] = -1
+        mask = depth > -1e-3 #貫通を考慮して少し地面の下に設定
+        return mask
+    
 
     def _get_obs(self):
         if self.observation_mode == 'cam_rgb':

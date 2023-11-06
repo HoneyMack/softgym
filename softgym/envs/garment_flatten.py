@@ -253,12 +253,23 @@ class GarmentFlattenEnv(ClothEnv):
         
     def sample_pick_pos(self)->np.ndarray:
         #布の点をランダムに選択して確実に持てる位置を選ぶ
-        particle_pos= self.get_positions()[:,:3]
-        pick_idx = np.random.randint(0, len(particle_pos))
-        picking_pos = particle_pos[pick_idx]
-        #ちょっと上めを持つ
-        picking_pos[1] += 0.01
-        return picking_pos
+        depth = self.get_cloth_depth()
+        cloth_mask = depth > 0
+        #pdb.set_trace()
+        ## 1つランダムに選択
+        cloth_idx = np.where(cloth_mask)
+        pick_idx = np.random.choice(cloth_idx[0])
+        py,px = cloth_idx[0][pick_idx], cloth_idx[1][pick_idx]
+        pz = depth[py,px]
+        pick_pos= self.convert_pixel_to_world(np.array([px,py,pz]))
+        return pick_pos
+        
+        # particle_pos= self.get_positions()[:,:3]
+        # pick_idx = np.random.randint(0, len(particle_pos))
+        # picking_pos = particle_pos[pick_idx]
+        # #ちょっと上めを持つ
+        # picking_pos[1] += 0.01
+        # return picking_pos
 
     def _get_current_covered_area(self, pos: np.ndarray):
         """
@@ -562,8 +573,8 @@ if __name__ == '__main__':
             'horizon': 10000,
             'headless': True,
             'action_repeat': 1,
-            'picker_radius': 0.02,#0.0001,
-            'picker_threshold': 0.015,#0.00625,
+            'picker_radius':0.0001,# 0.01,#
+            'picker_threshold': 0.00625,#0.015,#
             'num_variations': 1,
             'cached_states_path': f"{env_name}_{cloth_type}_init_states.pkl",
             'use_cached_states':  True,
@@ -601,11 +612,11 @@ if __name__ == '__main__':
 
 
     # pick and placeのテスト
-    # for i in range(1,5):
-    #     action = env.action_space.sample()
-    #     action['pick_pos'] = env.sample_pick_pos()
-    #     obs, reward, done, _ = env.step(action)
-    #     history.append(obs) #observation_modeに応じた描画
+    for i in range(1,5):
+        action = env.action_space.sample()
+        action['pick_pos'] = env.sample_pick_pos()
+        obs, reward, done, _ = env.step(action)
+        history.append(obs) #observation_modeに応じた描画
 
     env.close()
     
