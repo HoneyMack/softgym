@@ -15,6 +15,7 @@ import pickle
 import os
 import gym
 import gym.spaces as spaces
+from matplotlib import pyplot as plt
 
 import pdb
 
@@ -251,26 +252,94 @@ class GarmentFlattenEnv(ClothEnv):
         else:
             print('Warning: cloth not stable')
         
-    def sample_pick_pos(self)->np.ndarray:
+    def sample_pick_pixel(self)->np.ndarray:
+        """
+        ランダムにピッキングする点を決定する関数
+        
+        Returns
+        -------
+        np.ndarray
+            ピッキングする点の座標[px,py,z]
+        """
         #布の点をランダムに選択して確実に持てる位置を選ぶ
         depth = self.get_cloth_depth()
         cloth_mask = depth > 0
-        #pdb.set_trace()
-        ## 1つランダムに選択
+        
+        # 1つランダムに選択
         cloth_idx = np.where(cloth_mask)
         pick_idx = np.random.choice(cloth_idx[0])
+        
         py,px = cloth_idx[0][pick_idx], cloth_idx[1][pick_idx]
         pz = depth[py,px]
-        pick_pos= self.convert_pixel_to_world(np.array([px,py,pz]))
-        return pick_pos
+        pick_pixel = np.array([px,py,pz])
+        return pick_pixel
         
-        # particle_pos= self.get_positions()[:,:3]
-        # pick_idx = np.random.randint(0, len(particle_pos))
-        # picking_pos = particle_pos[pick_idx]
-        # #ちょっと上めを持つ
-        # picking_pos[1] += 0.01
-        # return picking_pos
+        
+    def sample_delta_pixel(self,max_dpx:int,max_dpy:int,max_dz:float,pick_pixel:np.ndarray)->np.ndarray:
+        """
+        ランダムに移動量を決定する関数.画面外に移動しようとする場合はクリップして画面内に収める
 
+        Parameters
+        ----------
+        max_dpx : int
+            x方向の最大移動量[px]
+        max_dpy : int
+            y方向の最大移動量[px]
+        max_dz : float
+            z方向の最大移動量[m]
+        pick_pixel : np.ndarray
+            ピッキングする点の座標[px,py,z]
+
+        Returns
+        -------
+        np.ndarray
+            移動量[dpx,dpy,dz]
+        """
+        
+        dpx = np.random.randint(-max_dpx,max_dpx+1)
+        dpy = np.random.randint(-max_dpy,max_dpy+1)
+        dz = np.random.uniform(0,max_dz)
+        
+        # 範囲外にマニピュレーションしようとする場合はクリップ
+        dpixel = np.array([dpx,dpy,dz])
+        place_pixel = pick_pixel + dpixel
+        place_pixel[0] = np.clip(place_pixel[0],0,self.camera_width-1)
+        place_pixel[1] = np.clip(place_pixel[1],0,self.camera_height-1)
+        
+        dpixel = place_pixel - pick_pixel
+        return dpixel
+    
+    def sample_action(self,sample_div:int=4,max_dz = 0.05)->Dict[str,np.ndarray]:
+        """
+        ランダムにアクションをサンプリングする関数
+
+        Parameters
+        ----------
+        sample_div : int, optional
+            delta_pixelの割合, by default 4
+        max_dz : float, optional
+            pick and placeの高さの最大値, by default 0.05
+
+        Returns
+        -------
+        Dict[str,np.ndarray]
+            サンプリングされたアクション
+        """
+        action = {}
+        pick_pixel = self.sample_pick_pixel()
+        pick_pos = self.convert_pixel_to_world(pick_pixel)
+        
+        max_dpx,max_dpy = self.camera_width//sample_div, self.camera_height//sample_div
+        delta_pixel = self.sample_delta_pixel(max_dpx,max_dpy,max_dz,pick_pixel)
+        place_pixel = pick_pixel + delta_pixel
+        place_pos = self.convert_pixel_to_world(np.hstack([place_pixel[0:2],pick_pixel[2]]))
+        place_pos[1] += delta_pixel[2] #z方向の移動量を反映
+        
+        action['pick_pos'] = pick_pos
+        action['place_pos'] = place_pos
+        
+        return action
+        
     def _get_current_covered_area(self, pos: np.ndarray):
         """
         Calculate the covered area by taking max x,y cood and min x,y coord, create a discritized grid between the points
@@ -575,7 +644,7 @@ if __name__ == '__main__':
             'action_repeat': 1,
             'picker_radius':0.0001,# 0.01,#
             'picker_threshold': 0.00625,#0.015,#
-            'num_variations': 1,
+            'num_variations': 1000,
             'cached_states_path': f"{env_name}_{cloth_type}_init_states.pkl",
             'use_cached_states':  True,
             'save_cached_states': False,
@@ -593,28 +662,37 @@ if __name__ == '__main__':
     obs = env.reset()
     history = [obs]
     
-    # pixel to worldのテスト
-    ## 3点左上・右上・左下の座標にpickerを移動
-    depth = env.get_depth()
+    # # pixel to worldのテスト
+    # ## 3点左上・右上・左下の座標にpickerを移動
+    # depth = env.get_depth()
     
-    pixel = np.array([[0,0],[env.camera_width//2,0],[0,env.camera_height//2]])
-    #pos_list = np.array([[-0.2,0.00,-0.2],[0.2,0.00,-0.2],[-0.2,0.00,0.2]]) # 大体の位置
-    for i in range(3):
-        z_pos = depth[pixel[i][1],pixel[i][0]]
-        pos = env.convert_pixel_to_world(np.hstack((pixel[i],z_pos)))
-        print("pixel:",pixel[i],"pos:",pos)
-        env.move_picker_to_pos(pos)
-        env.step_simulation()
-        env.render()
-        obs = env._get_obs()
-        history.append(obs)
+    # pixel = np.array([[0,0],[env.camera_width//2,0],[0,env.camera_height//2]])
+    # #pos_list = np.array([[-0.2,0.00,-0.2],[0.2,0.00,-0.2],[-0.2,0.00,0.2]]) # 大体の位置
+    # for i in range(3):
+    #     z_pos = depth[pixel[i][1],pixel[i][0]]
+    #     pos = env.convert_pixel_to_world(np.hstack((pixel[i],z_pos)))
+    #     print("pixel:",pixel[i],"pos:",pos)
+    #     env.move_picker_to_pos(pos)
+    #     env.step_simulation()
+    #     env.render()
+    #     obs = env._get_obs()
+    #     history.append(obs)
     
 
 
     # pick and placeのテスト
-    for i in range(1,5):
-        action = env.action_space.sample()
-        action['pick_pos'] = env.sample_pick_pos()
+    for i in range(1,10):
+        # action = {}
+        # pick_pixel = env.sample_pick_pixel()
+        # delta_pixel = env.sample_delta_pixel(env.camera_width//4,env.camera_height//4,0.05,pick_pixel)
+        # pick_pos = env.convert_pixel_to_world(pick_pixel)
+        # place_pos = env.convert_pixel_to_world(np.hstack([pick_pixel[:2] + delta_pixel[:2],pick_pixel[2]]))
+        # place_pos[1] += delta_pixel[2] 
+        # action['pick_pos'] = pick_pos
+        # action['place_pos'] = place_pos
+
+        action = env.sample_action()
+
         obs, reward, done, _ = env.step(action)
         history.append(obs) #observation_modeに応じた描画
 
