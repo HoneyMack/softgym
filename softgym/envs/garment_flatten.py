@@ -1,10 +1,12 @@
 from collections import defaultdict
 import numpy as np
+import scipy as sp
 import random
 import pyflex
 from softgym.envs.cloth_env import ClothEnv
 from copy import deepcopy
 from softgym.utils.misc import vectorized_range, vectorized_meshgrid
+from softgym.utils.geom_utils import intrinsic_from_fov, get_world2camera_transform
 from softgym.utils.pyflex_utils import center_object
 from scipy.spatial.transform import Rotation as R
 from typing import Dict, Any
@@ -388,6 +390,15 @@ class GarmentFlattenEnv(ClothEnv):
             self.set_state(state)
 
         self.current_config = deepcopy(config)
+        
+        # カメラの内部パラメータ・座標変換行列等を計算しておく
+        height, width = self.camera_height, self.camera_width
+        self.intrinsic_mat = intrinsic_from_fov(height, width, 45) # the fov is 45 degree
+        #TODO:LU分解を使うべき
+        self.intrinsic_mat_inv = np.linalg.inv(self.intrinsic_mat)
+        rot_mat, trans_mat = get_world2camera_transform(self)
+        self.world_to_cam_trans = rot_mat @ trans_mat
+        self.cam_to_world_trans = np.linalg.inv(self.world_to_cam_trans)
 
     def get_default_config(self):
         """
@@ -509,18 +520,15 @@ class GarmentFlattenEnv(ClothEnv):
         np.ndarray
             ワールド座標系での座標(x,z,y)
         """
-        from softgym.utils.geom_utils import intrinsic_from_fov, get_world2camera_transform
-        
-        height, width = self.camera_height, self.camera_width
-        K = intrinsic_from_fov(height, width, 45) # the fov is 45 degree
+        # pixel to cam
         pixel_homo = np.hstack((pixel,1))
         pixel_homo[0:2] *= pixel_homo[2] #(u,v,z,1) -> (uz,vz,z,1)
-        cam_homo = np.linalg.solve(K, pixel_homo)
+        cam_homo = self.intrinsic_mat_inv@pixel_homo
         
-        rot_mat, trans_mat = get_world2camera_transform(self)
-        
-        pos_homo = np.linalg.solve(rot_mat @ trans_mat,cam_homo)
+        # cam to world
+        pos_homo =self.cam_to_world_trans @ cam_homo
         pos = pos_homo[0:3]
+
         return pos
         
 
