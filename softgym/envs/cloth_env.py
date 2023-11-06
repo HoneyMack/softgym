@@ -127,6 +127,13 @@ class ClothEnv(FlexEnv):
         rgb, _ = pyflex.render_cloth()
         rgb = rgb.reshape((self.camera_height, self.camera_width, 4))[::-1, :, :3]
         return rgb
+    
+    
+    def get_depth(self):
+        _, depth = pyflex.render()
+        depth[depth > 10] = 0.
+        depth = depth.reshape((self.camera_height, self.camera_width))[::-1]
+        return depth
 
     def _get_obs(self):
         if self.observation_mode == 'cam_rgb':

@@ -717,7 +717,7 @@ void Init(int scene, py::array_t<float> scene_params, bool centerCamera = true, 
     g_drawDensity = false;
     g_ior = 1.0f;
     g_lightDistance = 10.0f;
-    g_fogDistance = 0.005f;
+    g_fogDistance = 1e0f;//光の減衰率を指定//0.005f;
 
     g_camSpeed = 0.075f;
     g_camNear = 0.01f;
@@ -1350,7 +1350,7 @@ void RenderScene() {
     //---------------------------------------
     // setup view and state
 
-    float fov = kPi / 4.0f; // 90 degrees
+    float fov = kPi / 4.0f; // 45 degrees
     float aspect = float(g_screenWidth) / g_screenHeight;
 
     Matrix44 proj = ProjectionMatrix(RadToDeg(fov), aspect, g_camNear, g_camFar);

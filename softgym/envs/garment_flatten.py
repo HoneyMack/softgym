@@ -14,6 +14,8 @@ import os
 import gym
 import gym.spaces as spaces
 
+import pdb
+
 #TODO:プログラムの整理・コメントの追加
 class GarmentFlattenEnv(ClothEnv):
     def __init__(self, cached_states_path='tshirt_flatten_init_states.pkl', cloth_type='tank_male', **kwargs):
@@ -493,7 +495,46 @@ class GarmentFlattenEnv(ClothEnv):
         pos[:, :3] += np.asarray(new_pos)
         self.set_positions(pos)
 
+    def convert_pixel_to_world(self, pixel:np.ndarray)->np.ndarray:
+        """
+        pixelの座標をワールド座標系に変換する関数
 
+        Parameters
+        ----------
+        pixel : np.ndarray
+            pixelの座標shape[3,](px,py,z)
+            
+        Returns
+        -------
+        np.ndarray
+            ワールド座標系での座標(x,z,y)
+        """
+        from softgym.utils.geom_utils import intrinsic_from_fov, get_world2camera_transform
+        
+        height, width = self.camera_height, self.camera_width
+        K = intrinsic_from_fov(height, width, 45) # the fov is 45 degree
+        pixel_homo = np.hstack((pixel,1))
+        pixel_homo[0:2] *= pixel_homo[2] #(u,v,z,1) -> (uz,vz,z,1)
+        cam_homo = np.linalg.solve(K, pixel_homo)
+        
+        rot_mat, trans_mat = get_world2camera_transform(self)
+        
+        pos_homo = np.linalg.solve(rot_mat @ trans_mat,cam_homo)
+        pos = pos_homo[0:3]
+        return pos
+        
+
+    def move_picker_to_pos(self,pos:np.ndarray):
+        """
+        pickerをワールド座標系でposに移動する関数
+
+        Parameters
+        ----------
+        pos : np.ndarray
+            pickerの移動先のワールド座標系での座標[picker_num,3]
+        """
+        
+        self.action_tool.set_picker_pos(pos)
 
 if __name__ == '__main__':
     from softgym.registered_env import env_arg_dict
@@ -505,17 +546,17 @@ if __name__ == '__main__':
         args.update({
             'env_name': env_name,
             'render_mode': 'cloth',
-            'observation_mode': "cloth_rgb",#'cam_rgb',
+            'observation_mode': 'cam_rgb',#"cloth_rgb",
             'render': True,
             'camera_height': 64,
             'camera_width': 64,
-            'camera_name': 'top_down_camera_full',
+            'camera_name': 'top_down_camera_full', #"default_camera",#
             'horizon': 10000,
             'headless': True,
             'action_repeat': 1,
-            'picker_radius': 0.0001,
+            'picker_radius': 0.02,#0.0001,
             'picker_threshold': 0.015,#0.00625,
-            'num_variations': 1000,
+            'num_variations': 1,
             'cached_states_path': f"{env_name}_{cloth_type}_init_states.pkl",
             'use_cached_states':  True,
             'save_cached_states': False,
@@ -533,11 +574,30 @@ if __name__ == '__main__':
     obs = env.reset()
     history = [obs]
     
-    for i in range(1,5):
-        action = env.action_space.sample()
-        action['pick_pos'] = env.sample_pick_pos()
-        obs, reward, done, _ = env.step(action)
-        history.append(obs) #observation_modeに応じた描画
+    # pixel to worldのテスト
+    ## 3点左上・右上・左下の座標にpickerを移動
+    depth = env.get_depth()
+    
+    pixel = np.array([[0,0],[env.camera_width//2,0],[0,env.camera_height//2]])
+    #pos_list = np.array([[-0.2,0.00,-0.2],[0.2,0.00,-0.2],[-0.2,0.00,0.2]]) # 大体の位置
+    for i in range(3):
+        z_pos = depth[pixel[i][1],pixel[i][0]]
+        pos = env.convert_pixel_to_world(np.hstack((pixel[i],z_pos)))
+        print("pixel:",pixel[i],"pos:",pos)
+        env.move_picker_to_pos(pos)
+        env.step_simulation()
+        env.render()
+        obs = env._get_obs()
+        history.append(obs)
+    
+
+
+    # pick and placeのテスト
+    # for i in range(1,5):
+    #     action = env.action_space.sample()
+    #     action['pick_pos'] = env.sample_pick_pos()
+    #     obs, reward, done, _ = env.step(action)
+    #     history.append(obs) #observation_modeに応じた描画
 
     env.close()
     

@@ -135,8 +135,8 @@ class Picker(ActionToolBase):
     def set_picker_pos(picker_pos):
         """ Caution! Should only be called during the reset of the environment. Used only for cloth drop environment. """
         shape_states = np.array(pyflex.get_shape_states()).reshape(-1, 14)
-        shape_states[:, 3:6] = picker_pos
-        shape_states[:, :3] = picker_pos
+        shape_states[:, 3:6] = picker_pos #1つ前の時刻でのpickerの位置
+        shape_states[:, :3] = picker_pos #現在時刻でのpickerの位置
         pyflex.set_shape_states(shape_states)
 
     def step(self, action):
