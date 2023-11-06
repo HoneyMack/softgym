@@ -16,7 +16,7 @@ def pixel_coord_np(width, height):
     return np.vstack((x.flatten(), y.flatten(), np.ones_like(x.flatten())))
 
 
-def intrinsic_from_fov(height:int, width:int, fov=90)->np.ndarray:
+def intrinsic_from_fov(height:int, width:int, fov=45)->np.ndarray:
 	"""
 	カメラをピンホールカメラとしたときの内部パラメータを計算する関数
 
@@ -27,7 +27,7 @@ def intrinsic_from_fov(height:int, width:int, fov=90)->np.ndarray:
 	width : int
 		カメラの横の画素数[px]
 	fov : int, optional
-		水平方向の視野角, by default 90
+		水平方向の視野角, by default 45
 
 	Returns
 	-------
@@ -121,7 +121,7 @@ def get_world_coords(rgb:np.ndarray, depth:np.ndarray, env:FlexEnv):
 def back_project_pixels(depth:np.ndarray, K:np.ndarray)->np.ndarray:
     """画像座標系->カメラ座標系へ変換"""
     height, width = depth.shape
-    cam_coords = np.ones((height, width, 4))
+    cam_coords = np.zeros((height, width, 4))
     u0, v0, fx, fy = K[0, 2], K[1, 2], K[0, 0], K[1, 1]
 
     for v in range(height):
@@ -130,6 +130,7 @@ def back_project_pixels(depth:np.ndarray, K:np.ndarray)->np.ndarray:
             y = (v - v0) * depth[v, u] / fy
             z = depth[v, u]
             cam_coords[v][u][:3] = (x, y, z)
+            cam_coords[v][u][3] = 1.0 # homogenous coordinate
 
     return cam_coords
 
@@ -152,7 +153,7 @@ def get_world2camera_transform(env:FlexEnv)->Tuple[np.ndarray,np.ndarray]:
     cam_pos = env.camera_params[camera_name]['pos']
     cam_angle = env.camera_params[camera_name]['angle']
 
-	# 回転行列:TODO: ここでの回転行列の計算は正しいか検証
+	# 回転行列
     matrix1 = get_rotation_matrix(-cam_angle[0], [0, 1, 0])
     matrix2 = get_rotation_matrix(-cam_angle[1] - np.pi, [1, 0, 0])
     rotation_matrix = matrix2 @ matrix1
