@@ -117,21 +117,24 @@ class ClothEnv(FlexEnv):
         rgb, _ = pyflex.render()
         rgb = rgb.reshape((self.camera_height, self.camera_width, 4))[::-1, :, :3] / 255.
         _, depth = pyflex.render_cloth()
-        depth[depth > 10] = 0.
+        #depth[depth > 10] = 0.
         depth = depth.reshape((self.camera_height, self.camera_width))[::-1]
         rgbd = np.concatenate([rgb, depth[:, :, None]], axis=-1)
         self.action_tool.show()
         return rgbd
 
     def get_cloth_rgb(self)->np.ndarray:
+        self.action_tool.hide()
         rgb, _ = pyflex.render_cloth()
         rgb = rgb.reshape((self.camera_height, self.camera_width, 4))[::-1, :, :3]
+        self.action_tool.show()
         return rgb
     
     def get_cloth_depth(self)->np.ndarray:
+        self.action_tool.hide()
         _, depth = pyflex.render_cloth()
-        depth[depth > 10] = 0.
         depth = depth.reshape((self.camera_height, self.camera_width))[::-1]
+        self.action_tool.show()
         return depth
     
     
@@ -150,10 +153,8 @@ class ClothEnv(FlexEnv):
             布部分のマスク[height,width]
                 True: 布部分, False: 布以外
         """
-        _, depth = pyflex.render_cloth()
-        depth = depth.reshape((self.camera_height, self.camera_width))[::-1]
-        depth[depth > 10] = -1
-        mask = depth > -1e-3 #貫通を考慮して少し地面の下に設定
+        depth = self.get_cloth_depth()
+        mask = depth < 10
         return mask
     
 
