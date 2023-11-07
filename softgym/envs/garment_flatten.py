@@ -155,6 +155,7 @@ class GarmentFlattenEnv(ClothEnv):
         
         if to_flat:
             self._set_to_flat()
+            obs = self._get_obs() # flatにした後のobsを返す
             
         return obs
 
@@ -263,11 +264,11 @@ class GarmentFlattenEnv(ClothEnv):
         """
         #布の点をランダムに選択して確実に持てる位置を選ぶ
         depth = self.get_cloth_depth()
-        cloth_mask = depth > 0
+        cloth_mask = self.get_cloth_mask()
         
         # 1つランダムに選択
         cloth_idx = np.where(cloth_mask)
-        pick_idx = np.random.choice(cloth_idx[0])
+        pick_idx = np.random.choice(cloth_idx[0].size)
         
         py,px = cloth_idx[0][pick_idx], cloth_idx[1][pick_idx]
         pz = depth[py,px]
@@ -333,7 +334,7 @@ class GarmentFlattenEnv(ClothEnv):
         delta_pixel = self.sample_delta_pixel(max_dpx,max_dpy,max_dz,pick_pixel)
         place_pixel = pick_pixel + delta_pixel
         place_pos = self.convert_pixel_to_world(np.hstack([place_pixel[0:2],pick_pixel[2]]))
-        place_pos[1] += delta_pixel[2] #z方向の移動量を反映
+        place_pos[1] += delta_pixel[2] +0.01 #z方向の移動量を反映:必ず0.01以上持ち上げる
         
         action['pick_pos'] = pick_pos
         action['place_pos'] = place_pos
@@ -499,7 +500,7 @@ class GarmentFlattenEnv(ClothEnv):
             'scale': cloth_scales[self.cloth_type],
             'rot': 0.0,
             'vel': [0., 0., 0.],
-            'stiff': 2.0*1e-1,
+            'stiff': 4.0*1e-1,
             'mass': 0.5 / (40 * 40)*((1e-1)**2),
             'radius': self.cloth_particle_radius,  # / 1.8,
             'cloth_type': 0
@@ -623,6 +624,8 @@ class GarmentFlattenEnv(ClothEnv):
         """
         
         self.action_tool.set_picker_pos(pos)
+        
+        
 
 if __name__ == '__main__':
     from softgym.registered_env import env_arg_dict
@@ -642,7 +645,7 @@ if __name__ == '__main__':
             'horizon': 10000,
             'headless': True,
             'action_repeat': 1,
-            'picker_radius':0.0001,# 0.01,#
+            'picker_radius':0.0001,# 0.01,# 
             'picker_threshold': 0.00625,#0.015,#
             'num_variations': 1000,
             'cached_states_path': f"{env_name}_{cloth_type}_init_states.pkl",
@@ -662,26 +665,41 @@ if __name__ == '__main__':
     obs = env.reset()
     history = [obs]
     
-    # # pixel to worldのテスト
-    # ## 3点左上・右上・左下の座標にpickerを移動
-    # depth = env.get_depth()
     
-    # pixel = np.array([[0,0],[env.camera_width//2,0],[0,env.camera_height//2]])
-    # #pos_list = np.array([[-0.2,0.00,-0.2],[0.2,0.00,-0.2],[-0.2,0.00,0.2]]) # 大体の位置
-    # for i in range(3):
-    #     z_pos = depth[pixel[i][1],pixel[i][0]]
-    #     pos = env.convert_pixel_to_world(np.hstack((pixel[i],z_pos)))
-    #     print("pixel:",pixel[i],"pos:",pos)
-    #     env.move_picker_to_pos(pos)
-    #     env.step_simulation()
-    #     env.render()
-    #     obs = env._get_obs()
-    #     history.append(obs)
+    # pixel to worldのテスト
+    ## 3点左上・右上・左下の座標にpickerを移動
+    depth = env.get_depth()
     
+    pixel = np.array([[0,0],[env.camera_width-1,0],[0,env.camera_height-1],[env.camera_width-1,env.camera_height-1]])
+    #pos_list = np.array([[-0.2,0.00,-0.2],[0.2,0.00,-0.2],[-0.2,0.00,0.2]]) # 大体の位置
+    for i in range(pixel.shape[0]):
+        z_pos = depth[pixel[i][1],pixel[i][0]]
+        pos = env.convert_pixel_to_world(np.hstack((pixel[i],z_pos)))
+        print("pixel:",pixel[i],"pos:",pos)
+        env.move_picker_to_pos(pos)
+        env.step_simulation()
+        env.render()
+        obs = env._get_obs()
+        history.append(obs)
 
-
+    # pick and place の場所に偏りがないかを確認    
+    obs = env.reset()
+    for i in range(10):
+        pick_pixel = env.sample_pick_pixel()
+        delta_pixel = env.sample_delta_pixel(env.camera_width//4,env.camera_height//4,0.05,pick_pixel)
+        startc,startr = int(pick_pixel[0]),int(pick_pixel[1])
+        endc,endr = int(pick_pixel[0] + delta_pixel[0]),int(pick_pixel[1] + delta_pixel[1])
+      
+        cv2.arrowedLine(obs, (startc, startr), (endc, endr), (i*20, i*20, 255-i*20), 1)
+    
+    mask = env.get_cloth_mask().astype(np.uint8)*255
+    mask = np.stack([mask,mask,mask],axis=-1)#gray->rgb
+    #pdb.set_trace()
+    obs_rgb_d = np.concatenate([obs,mask],axis=1)
+    history.append(obs_rgb_d)
+        
     # pick and placeのテスト
-    for i in range(1,10):
+    for i in range(1,5):
         # action = {}
         # pick_pixel = env.sample_pick_pixel()
         # delta_pixel = env.sample_delta_pixel(env.camera_width//4,env.camera_height//4,0.05,pick_pixel)
@@ -691,10 +709,14 @@ if __name__ == '__main__':
         # action['pick_pos'] = pick_pos
         # action['place_pos'] = place_pos
 
-        action = env.sample_action()
+        action = env.sample_action(sample_div=4)
 
         obs, reward, done, _ = env.step(action)
-        history.append(obs) #observation_modeに応じた描画
+        # rgbとmaskを並べて表示
+        mask = env.get_cloth_mask().astype(np.uint8)*255
+        mask = np.stack([mask,mask,mask],axis=-1)#gray->rgb
+        obs_rgb_d = np.concatenate([obs,mask],axis=1)
+        history.append(obs_rgb_d)
 
     env.close()
     
